@@ -66,9 +66,11 @@ func (cmd *command) runE(args []string) (err error) {
 	if err != nil {
 		return
 	}
+
+	// --abort
 	if cmd.abort {
 		abort()
-		branch, err := getCurrentBranch()
+		branch, err := getHeadBranch()
 		if err != nil {
 			return err
 		}
@@ -79,40 +81,59 @@ func (cmd *command) runE(args []string) (err error) {
 		}
 		return nil
 	}
+
+	// fetch
 	fetch := exec.Command("git", "fetch", "-f", "origin", args[0])
 	out, err := fetch.CombinedOutput()
 	if err != nil {
 		fmt.Print(string(out))
 		return fmt.Errorf("%s: %s", fetch.String(), err)
 	}
+
+	// --dry-run
 	if cmd.dryRun {
-		merge := exec.Command("git", "merge", "--no-commit", "--no-ff", "origin/"+args[0])
+		merge := exec.Command("git", "merge", "--no-ff", "--no-commit", "origin/"+args[0])
 		out, _ = merge.CombinedOutput()
 		fmt.Print(strings.ReplaceAll(string(out), "; stopped before committing as requested", ""))
 		abort()
-	} else {
-		branch, err := getCurrentBranch()
-		if err != nil {
-			return err
-		}
-		push := exec.Command("git", "push", "-f", "origin", branch)
-		err = push.Run()
-		if err != nil {
-			return fmt.Errorf("%s: %s", push.String(), err)
-		}
-		reset := exec.Command("git", "reset", "--hard", "origin/"+args[0])
-		err = reset.Run()
-		if err != nil {
-			return fmt.Errorf("%s: %s", reset.String(), err)
-		}
-		merge := exec.Command("git", "merge", "origin/"+branch)
-		out, _ = merge.CombinedOutput()
-		fmt.Print(string(out))
+		return nil
 	}
-	return
+
+	// status
+	status := exec.Command("git", "status", "--porcelain", "-uno")
+	out, _ = status.Output()
+	outs := strings.TrimSpace(string(out))
+	if len(outs) > 0 {
+		return fmt.Errorf("Changes not committed before merge:\n%s", outs)
+	}
+
+	// merge
+	branch, err := getHeadBranch()
+	if err != nil {
+		return err
+	}
+	push := exec.Command("git", "push", "-f", "origin", branch)
+	err = push.Run()
+	if err != nil {
+		return fmt.Errorf("%s: %s", push.String(), err)
+	}
+	reset := exec.Command("git", "reset", "--hard", "origin/"+args[0])
+	err = reset.Run()
+	if err != nil {
+		return fmt.Errorf("%s: %s", reset.String(), err)
+	}
+	merge := exec.Command("git", "merge", "--no-ff", "origin/"+branch)
+	out, _ = merge.CombinedOutput()
+	outs = string(out)
+	if strings.Contains(outs, "up to date") {
+		fmt.Printf("Fast-forward to %s\n", args[0])
+	} else {
+		fmt.Print(outs)
+	}
+	return nil
 }
 
-func getCurrentBranch() (string, error) {
+func getHeadBranch() (string, error) {
 	revParse := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := revParse.Output()
 	if err != nil {

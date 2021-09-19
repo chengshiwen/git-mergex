@@ -19,12 +19,17 @@ package cmd
 import (
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-var Version = "unknown"
+var (
+	Version   = "unknown"
+	GitCommit = "unknown"
+	BuildTime = "unknown"
+)
 
 type command struct {
 	cobraCmd *cobra.Command
@@ -47,11 +52,12 @@ func NewCommand() *cobra.Command {
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		Version:       Version,
+		Version:       version(),
 		RunE: func(c *cobra.Command, args []string) error {
 			return cmd.runE(args)
 		},
 	}
+	cmd.cobraCmd.SetVersionTemplate(`{{.Version}}`)
 	pflags := cmd.cobraCmd.PersistentFlags()
 	pflags.BoolVarP(&cmd.dryRun, "dry-run", "d", false, "simulate to merge two development histories together")
 	pflags.BoolVarP(&cmd.abort, "abort", "a", false, "abort the current conflict resolution process")
@@ -149,4 +155,14 @@ func getHeadBranch() (string, error) {
 func abort() {
 	mergeAbort := exec.Command("git", "merge", "--abort")
 	_ = mergeAbort.Run()
+}
+
+func version() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Version:    %s\n", Version))
+	sb.WriteString(fmt.Sprintf("Git commit: %s\n", GitCommit))
+	sb.WriteString(fmt.Sprintf("Build time: %s\n", BuildTime))
+	sb.WriteString(fmt.Sprintf("Go version: %s\n", runtime.Version()))
+	sb.WriteString(fmt.Sprintf("OS/Arch:    %s/%s\n", runtime.GOOS, runtime.GOARCH))
+	return sb.String()
 }

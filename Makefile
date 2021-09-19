@@ -1,10 +1,11 @@
 # Makefile
 
+PROGRAM     := git-mergex
 VERSION     := 0.1.0
 LDFLAGS     ?= "-s -w -X github.com/chengshiwen/git-mergex/cmd.Version=$(VERSION)"
 GOBUILD_ENV = GO111MODULE=on CGO_ENABLED=0
 GOX         = go run github.com/mitchellh/gox
-TARGETS     := darwin/amd64 darwin/arm64
+TARGETS     := darwin/amd64 darwin/arm64 linux/amd64 windows/amd64
 DIST_DIRS   := find * -maxdepth 0 -type d -exec
 
 .PHONY: build cross-build release test lint down tidy clean
@@ -12,10 +13,10 @@ DIST_DIRS   := find * -maxdepth 0 -type d -exec
 all: build
 
 build:
-	$(GOBUILD_ENV) go build -o bin/git-mergex -a -ldflags $(LDFLAGS)
+	$(GOBUILD_ENV) go build -o bin/$(PROGRAM) -a -ldflags $(LDFLAGS)
 
 cross-build: clean
-	$(GOBUILD_ENV) $(GOX) -ldflags $(LDFLAGS) -parallel=2 -output="bin/git-mergex-{{.OS}}-{{.Arch}}/git-mergex" -osarch='$(TARGETS)' .
+	$(GOBUILD_ENV) $(GOX) -ldflags $(LDFLAGS) -parallel=4 -output="bin/$(PROGRAM)-$(VERSION)-{{.OS}}-{{.Arch}}/$(PROGRAM)" -osarch='$(TARGETS)' .
 
 release: cross-build
 	( \

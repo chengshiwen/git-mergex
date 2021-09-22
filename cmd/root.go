@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -35,6 +36,7 @@ type command struct {
 	cobraCmd *cobra.Command
 	dryRun   bool
 	abort    bool
+	cont     bool
 }
 
 func Execute() {
@@ -61,12 +63,13 @@ func NewCommand() *cobra.Command {
 	pflags := cmd.cobraCmd.PersistentFlags()
 	pflags.BoolVarP(&cmd.dryRun, "dry-run", "d", false, "simulate to merge two development histories together")
 	pflags.BoolVarP(&cmd.abort, "abort", "a", false, "abort the current conflict resolution process")
+	pflags.BoolVarP(&cmd.cont, "continue", "c", false, "continue to merge after a git merge stops due to conflicts")
 	return cmd.cobraCmd
 }
 
 func (cmd *command) runE(args []string) (err error) {
-	if (cmd.abort && len(args) > 0) || (!cmd.abort && len(args) == 0) {
-		return fmt.Errorf("only one of --abort and <branch|commit> can be specified")
+	if (len(args) > 0 && (cmd.abort || cmd.cont)) || (len(args) == 0 && (cmd.abort == cmd.cont)) {
+		return fmt.Errorf("only one of <branch|commit>, --abort and --continue can be specified")
 	}
 	_, err = exec.LookPath("git")
 	if err != nil {
@@ -85,6 +88,15 @@ func (cmd *command) runE(args []string) (err error) {
 		if err != nil {
 			return fmt.Errorf("%s: %s", reset.String(), err)
 		}
+		return nil
+	}
+
+	// --continue
+	if cmd.cont {
+		cont := exec.Command("git", "merge", "--continue")
+		cont.Stdin = os.Stdin
+		cont.Stdout = os.Stdout
+		_ = cont.Run()
 		return nil
 	}
 

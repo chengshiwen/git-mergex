@@ -128,7 +128,7 @@ func (cmd *command) runE(args []string) (err error) {
 	if err != nil {
 		return fmt.Errorf("%s: %s", reset.String(), err)
 	}
-	merge := exec.Command("git", "merge", "--no-ff", "origin/"+branch)
+	merge := exec.Command("git", "merge", "--no-ff", "-m", fmt.Sprintf("Merge branch '%s' into %s", branch, args[0]), "origin/"+branch)
 	out, _ = merge.CombinedOutput()
 	outs = string(out)
 	if strings.Contains(outs, "up to date") {

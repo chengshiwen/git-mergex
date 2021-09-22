@@ -32,6 +32,8 @@ var (
 	BuildTime = "unknown"
 )
 
+const remote = "origin"
+
 type command struct {
 	cobraCmd *cobra.Command
 	dryRun   bool
@@ -79,14 +81,14 @@ func (cmd *command) runE(args []string) (err error) {
 	// --abort
 	if cmd.abort {
 		abort()
-		branch, err := getHeadBranch()
+		branch, err := headBranch()
 		if err != nil {
 			return err
 		}
-		reset := exec.Command("git", "reset", "--hard", "origin/"+branch)
+		reset := exec.Command("git", "reset", "--hard", remoteBranch(branch))
 		err = reset.Run()
 		if err != nil {
-			return fmt.Errorf("%s: %s", reset.String(), err)
+			return commandError(reset, err)
 		}
 		return nil
 	}
@@ -101,16 +103,19 @@ func (cmd *command) runE(args []string) (err error) {
 	}
 
 	// fetch
-	fetch := exec.Command("git", "fetch", "-f", "origin", args[0])
+	fetch := exec.Command("git", "fetch", "-f", remote, args[0])
 	out, err := fetch.CombinedOutput()
 	if err != nil {
 		fmt.Print(string(out))
-		return fmt.Errorf("%s: %s", fetch.String(), err)
+		if strings.Contains(strings.ToLower(string(out)), "couldn't find remote ref") && strings.HasPrefix(args[0], remote) {
+			fmt.Printf("it seems that the branch '%s' should not start with '%s'\n", args[0], remote)
+		}
+		return commandError(fetch, err)
 	}
 
 	// --dry-run
 	if cmd.dryRun {
-		merge := exec.Command("git", "merge", "--no-ff", "--no-commit", "origin/"+args[0])
+		merge := exec.Command("git", "merge", "--no-ff", "--no-commit", remoteBranch(args[0]))
 		out, _ = merge.CombinedOutput()
 		fmt.Print(strings.ReplaceAll(string(out), "; stopped before committing as requested", ""))
 		abort()
@@ -126,21 +131,21 @@ func (cmd *command) runE(args []string) (err error) {
 	}
 
 	// merge
-	branch, err := getHeadBranch()
+	branch, err := headBranch()
 	if err != nil {
 		return err
 	}
-	push := exec.Command("git", "push", "-f", "origin", branch)
+	push := exec.Command("git", "push", "-f", remote, branch)
 	err = push.Run()
 	if err != nil {
-		return fmt.Errorf("%s: %s", push.String(), err)
+		return commandError(push, err)
 	}
-	reset := exec.Command("git", "reset", "--hard", "origin/"+args[0])
+	reset := exec.Command("git", "reset", "--hard", remoteBranch(args[0]))
 	err = reset.Run()
 	if err != nil {
-		return fmt.Errorf("%s: %s", reset.String(), err)
+		return commandError(reset, err)
 	}
-	merge := exec.Command("git", "merge", "--no-ff", "-m", fmt.Sprintf("Merge branch '%s' into %s", branch, args[0]), "origin/"+branch)
+	merge := exec.Command("git", "merge", "--no-ff", "-m", fmt.Sprintf("Merge branch '%s' into %s", branch, args[0]), remoteBranch(branch))
 	out, _ = merge.CombinedOutput()
 	outs = string(out)
 	if strings.Contains(outs, "up to date") {
@@ -151,11 +156,11 @@ func (cmd *command) runE(args []string) (err error) {
 	return nil
 }
 
-func getHeadBranch() (string, error) {
+func headBranch() (string, error) {
 	revParse := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
 	out, err := revParse.Output()
 	if err != nil {
-		return "", fmt.Errorf("%s: %s", revParse.String(), err)
+		return "", commandError(revParse, err)
 	}
 	branch := strings.TrimSpace(string(out))
 	if branch == "master" || strings.HasPrefix(branch, "release") {
@@ -164,9 +169,22 @@ func getHeadBranch() (string, error) {
 	return branch, nil
 }
 
+func remoteBranch(branch string) string {
+	return fmt.Sprintf("%s/%s", remote, branch)
+}
+
 func abort() {
 	mergeAbort := exec.Command("git", "merge", "--abort")
 	_ = mergeAbort.Run()
+}
+
+func commandError(c *exec.Cmd, e error) error {
+	s := c.String()
+	i := strings.Index(s, "git")
+	if i > -1 {
+		s = s[i:]
+	}
+	return fmt.Errorf("%s: %s", s, e)
 }
 
 func version() string {

@@ -1,7 +1,7 @@
 # Makefile
 
 PROGRAM     := git-mergex
-VERSION     := 0.1.2
+VERSION     := 0.1.3
 LDFLAGS     ?= "-s -w -X github.com/chengshiwen/git-mergex/cmd.Version=$(VERSION) -X github.com/chengshiwen/git-mergex/cmd.GitCommit=$(shell git rev-parse --short HEAD) -X 'github.com/chengshiwen/git-mergex/cmd.BuildTime=$(shell date '+%Y-%m-%d %H:%M:%S')'"
 GOBUILD_ENV = GO111MODULE=on CGO_ENABLED=0
 GOX         = go run github.com/mitchellh/gox

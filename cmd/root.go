@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/chengshiwen/git-mergex/cmd/completion"
 	"github.com/spf13/cobra"
 )
 
@@ -57,16 +58,47 @@ func NewCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version(),
+		ValidArgsFunction: func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			return cmd.comp(args, toComplete)
+		},
 		RunE: func(c *cobra.Command, args []string) error {
 			return cmd.runE(args)
 		},
 	}
 	cmd.cobraCmd.SetVersionTemplate(`{{.Version}}`)
-	pflags := cmd.cobraCmd.PersistentFlags()
+	pflags := cmd.cobraCmd.Flags()
 	pflags.BoolVarP(&cmd.dryRun, "dry-run", "d", false, "simulate to merge two development histories together")
 	pflags.BoolVarP(&cmd.abort, "abort", "a", false, "abort the current conflict resolution process")
 	pflags.BoolVarP(&cmd.cont, "continue", "c", false, "continue to merge after a git merge stops due to conflicts")
+	cmd.cobraCmd.AddCommand(completion.NewCommand())
 	return cmd.cobraCmd
+}
+
+func (cmd *command) comp(args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if cmd.abort || cmd.cont || len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	fetch := exec.Command("git", "branch", "-r")
+	out, err := fetch.Output()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	branchSet := make(map[string]bool)
+	for _, item := range strings.Split(string(out), "\n") {
+		branch := strings.TrimSpace(item)
+		if len(branch) > 0 {
+			if strings.HasPrefix(branch, remoteBranch("HEAD")) {
+				continue
+			}
+			branch = strings.TrimPrefix(branch, remoteBranch(""))
+			branchSet[branch] = true
+		}
+	}
+	var choices []string
+	for branch := range branchSet {
+		choices = append(choices, branch)
+	}
+	return choices, cobra.ShellCompDirectiveNoFileComp
 }
 
 func (cmd *command) runE(args []string) (err error) {

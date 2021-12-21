@@ -24,6 +24,7 @@ Flags:
   -c, --continue   continue to merge after a git merge stops due to conflicts
   -d, --dry-run    simulate to merge two development histories together
   -h, --help       help for git-mergex
+  -r, --remove     remove all temporary mergex branches
   -v, --version    version for git-mergex
 
 Use "git-mergex [command] --help" for more information about a command
@@ -34,6 +35,7 @@ Specifically, there are three usages for merge:
   git-mergex [--dry-run] <branch|commit>
   git-mergex --abort
   git-mergex --continue
+  git-mergex --remove
 ```
 
 ## Shell Completion

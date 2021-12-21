@@ -33,13 +33,17 @@ var (
 	BuildTime = "unknown"
 )
 
-const remote = "origin"
+const (
+	remote = "origin"
+	mergex = "_mergex"
+)
 
 type command struct {
 	cobraCmd *cobra.Command
 	dryRun   bool
 	abort    bool
 	cont     bool
+	remove   bool
 }
 
 func Execute() {
@@ -70,16 +74,17 @@ func NewCommand() *cobra.Command {
 	pflags.BoolVarP(&cmd.dryRun, "dry-run", "d", false, "simulate to merge two development histories together")
 	pflags.BoolVarP(&cmd.abort, "abort", "a", false, "abort the current conflict resolution process")
 	pflags.BoolVarP(&cmd.cont, "continue", "c", false, "continue to merge after a git merge stops due to conflicts")
+	pflags.BoolVarP(&cmd.remove, "remove", "r", false, "remove all temporary mergex branches")
 	cmd.cobraCmd.AddCommand(completion.NewCommand())
 	return cmd.cobraCmd
 }
 
 func (cmd *command) comp(args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if cmd.abort || cmd.cont || len(args) > 0 {
+	if cmd.abort || cmd.cont || cmd.remove || len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	fetch := exec.Command("git", "branch", "-r")
-	out, err := fetch.Output()
+	branchCmd := exec.Command("git", "branch", "-r")
+	out, err := branchCmd.Output()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -102,83 +107,116 @@ func (cmd *command) comp(args []string, toComplete string) ([]string, cobra.Shel
 }
 
 func (cmd *command) runE(args []string) (err error) {
-	if (len(args) > 0 && (cmd.abort || cmd.cont)) || (len(args) == 0 && (cmd.abort == cmd.cont)) {
-		return fmt.Errorf("only one of <branch|commit>, --abort and --continue can be specified")
+	if len(args)+boolSum(cmd.abort, cmd.cont, cmd.remove) != 1 {
+		return fmt.Errorf("only one of <branch|commit>, --abort, --continue and --remove can be specified")
 	}
 	_, err = exec.LookPath("git")
 	if err != nil {
 		return
 	}
 
+	branch, err := headBranch()
+	if err != nil {
+		return err
+	}
+
 	// --abort
 	if cmd.abort {
-		abort()
-		branch, err := headBranch()
+		abortMerge()
+		resetCmd := exec.Command("git", "reset", "--hard", mergexBranch(branch))
+		err = resetCmd.Run()
 		if err != nil {
-			return err
+			return commandError(resetCmd, err)
 		}
-		reset := exec.Command("git", "reset", "--hard", remoteBranch(branch))
-		err = reset.Run()
-		if err != nil {
-			return commandError(reset, err)
-		}
+		deleteBranch(mergexBranch(branch))
 		return nil
 	}
 
 	// --continue
 	if cmd.cont {
-		cont := exec.Command("git", "merge", "--continue")
-		cont.Stdin = os.Stdin
-		cont.Stdout = os.Stdout
-		_ = cont.Run()
+		mergeCmd := exec.Command("git", "merge", "--continue")
+		mergeCmd.Stdin = os.Stdin
+		mergeCmd.Stdout = os.Stdout
+		_ = mergeCmd.Run()
+		deleteBranch(mergexBranch(branch))
+		return nil
+	}
+
+	// --remove
+	if cmd.remove {
+		branchCmd := exec.Command("git", "branch")
+		out, err := branchCmd.Output()
+		if err != nil {
+			return commandError(branchCmd, err)
+		}
+		branches := make([]string, 0)
+		for _, item := range strings.Split(string(out), "\n") {
+			_branch := strings.TrimSpace(item)
+			if len(_branch) > 0 {
+				if strings.HasPrefix(_branch, mergex) {
+					branches = append(branches, _branch)
+				}
+			}
+		}
+		if len(branches) > 0 {
+			rmCmd := &exec.Cmd{
+				Path: "git",
+				Args: append([]string{"git", "branch", "-D"}, branches...),
+			}
+			if lp, err := exec.LookPath("git"); err == nil {
+				rmCmd.Path = lp
+			}
+			rmCmd.Stdin = os.Stdin
+			rmCmd.Stdout = os.Stdout
+			_ = rmCmd.Run()
+		}
 		return nil
 	}
 
 	// fetch
-	fetch := exec.Command("git", "fetch", "-f", remote, args[0])
-	out, err := fetch.CombinedOutput()
+	fetchCmd := exec.Command("git", "fetch", "-f", remote, args[0])
+	out, err := fetchCmd.CombinedOutput()
 	if err != nil {
 		fmt.Print(string(out))
 		if strings.Contains(strings.ToLower(string(out)), "couldn't find remote ref") && strings.HasPrefix(args[0], remote) {
 			fmt.Printf("it seems that the branch '%s' should not start with '%s'\n", args[0], remote)
 		}
-		return commandError(fetch, err)
+		return commandError(fetchCmd, err)
 	}
 
 	// --dry-run
 	if cmd.dryRun {
-		merge := exec.Command("git", "merge", "--no-ff", "--no-commit", remoteBranch(args[0]))
-		out, _ = merge.CombinedOutput()
+		mergeCmd := exec.Command("git", "merge", "--no-ff", "--no-commit", remoteBranch(args[0]))
+		out, _ = mergeCmd.CombinedOutput()
 		fmt.Print(strings.ReplaceAll(string(out), "; stopped before committing as requested", ""))
-		abort()
+		abortMerge()
 		return nil
 	}
 
 	// status
-	status := exec.Command("git", "status", "--porcelain", "-uno")
-	out, _ = status.Output()
+	statusCmd := exec.Command("git", "status", "--porcelain", "-uno")
+	out, _ = statusCmd.Output()
 	outs := strings.TrimSpace(string(out))
 	if len(outs) > 0 {
 		return fmt.Errorf("Changes not committed before merge:\n%s", outs)
 	}
 
 	// merge
-	branch, err := headBranch()
+	branchCmd := exec.Command("git", "branch", "-f", mergexBranch(branch))
+	err = branchCmd.Run()
 	if err != nil {
-		return err
+		return commandError(branchCmd, err)
 	}
-	push := exec.Command("git", "push", "-f", remote, branch)
-	err = push.Run()
+	resetCmd := exec.Command("git", "reset", "--hard", remoteBranch(args[0]))
+	err = resetCmd.Run()
 	if err != nil {
-		return commandError(push, err)
+		return commandError(resetCmd, err)
 	}
-	reset := exec.Command("git", "reset", "--hard", remoteBranch(args[0]))
-	err = reset.Run()
-	if err != nil {
-		return commandError(reset, err)
+	mergeCmd := exec.Command("git", "merge", "--no-ff", "-m", fmt.Sprintf("Merge branch '%s' into %s", branch, args[0]), mergexBranch(branch))
+	out, err = mergeCmd.CombinedOutput()
+	if err == nil {
+		deleteBranch(mergexBranch(branch))
 	}
-	merge := exec.Command("git", "merge", "--no-ff", "-m", fmt.Sprintf("Merge branch '%s' into %s", branch, args[0]), remoteBranch(branch))
-	out, _ = merge.CombinedOutput()
 	outs = string(out)
 	if strings.Contains(outs, "up to date") {
 		fmt.Printf("Fast-forward to %s\n", args[0])
@@ -189,10 +227,10 @@ func (cmd *command) runE(args []string) (err error) {
 }
 
 func headBranch() (string, error) {
-	revParse := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
-	out, err := revParse.Output()
+	revParseCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := revParseCmd.Output()
 	if err != nil {
-		return "", commandError(revParse, err)
+		return "", commandError(revParseCmd, err)
 	}
 	branch := strings.TrimSpace(string(out))
 	if branch == "master" || strings.HasPrefix(branch, "release") {
@@ -205,9 +243,18 @@ func remoteBranch(branch string) string {
 	return fmt.Sprintf("%s/%s", remote, branch)
 }
 
-func abort() {
-	mergeAbort := exec.Command("git", "merge", "--abort")
-	_ = mergeAbort.Run()
+func mergexBranch(branch string) string {
+	return fmt.Sprintf("%s/%s", mergex, branch)
+}
+
+func abortMerge() {
+	mergeCmd := exec.Command("git", "merge", "--abort")
+	_ = mergeCmd.Run()
+}
+
+func deleteBranch(branch string) {
+	branchCmd := exec.Command("git", "branch", "-D", branch)
+	_ = branchCmd.Run()
 }
 
 func commandError(c *exec.Cmd, e error) error {
@@ -217,6 +264,16 @@ func commandError(c *exec.Cmd, e error) error {
 		s = s[i:]
 	}
 	return fmt.Errorf("%s: %s", s, e)
+}
+
+func boolSum(items ...bool) int {
+	sum := 0
+	for _, item := range items {
+		if item {
+			sum++
+		}
+	}
+	return sum
 }
 
 func version() string {

@@ -152,10 +152,8 @@ func (cmd *command) runE(args []string) (err error) {
 		branches := make([]string, 0)
 		for _, item := range strings.Split(string(out), "\n") {
 			_branch := strings.TrimSpace(item)
-			if len(_branch) > 0 {
-				if strings.HasPrefix(_branch, mergex) {
-					branches = append(branches, _branch)
-				}
+			if strings.HasPrefix(_branch, mergex) {
+				branches = append(branches, _branch)
 			}
 		}
 		if len(branches) > 0 {

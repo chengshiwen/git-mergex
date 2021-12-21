@@ -233,9 +233,6 @@ func headBranch() (string, error) {
 		return "", commandError(revParseCmd, err)
 	}
 	branch := strings.TrimSpace(string(out))
-	if branch == "master" || strings.HasPrefix(branch, "release") {
-		return branch, fmt.Errorf("branch %s is forbidden", branch)
-	}
 	return branch, nil
 }
 
